@@ -1,0 +1,99 @@
+---
+title: "English words frequency"
+author: "NighTurs"
+date: "December 20, 2015"
+output: html_document
+---
+
+```{r, results='hold', echo=FALSE, message=FALSE}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(Metrics)
+```
+
+Read and clean data.
+```{r}
+wf <- fread("data/SUBTLEXus74286wordstextversion.txt", header = T, sep = "\t")
+wf <- rename(wf, word = Word, freq_count = FREQcount, cd_count = CDcount,
+             freq_low = FREQlow, cd_low = Cdlow, subtl_wf = SUBTLWF, 
+             lg10_wf = Lg10WF, subtl_cd = SUBTLCD, lg10_cd = Lg10CD)
+wf <- wf[rev(order(freq_count)), rating_wf := .I]
+setkey(wf, 'word')
+str(wf)
+```
+
+If we will consider top N words by frequency, what percentage of text they will cover?
+```{r, fig.width=16, fig.height=9}
+word_sum <- sum(wf$freq_count)
+rank <- wf %>% mutate(freq_word = freq_count / word_sum) %>% 
+    arrange(rating_wf) %>%
+    mutate(cum_percent = cumsum(freq_word))
+
+set.seed(12)
+ggplot(rank[cum_percent > 0.6 & cum_percent < 0.96], 
+       aes(rating_wf, cum_percent, label = word)) + 
+    geom_text(check_overlap = T, size = 5, angle = -45, color = "steelblue") +
+    scale_x_discrete(breaks = seq(0, 10000, 500)) +
+    scale_y_continuous(breaks = seq(0, 1, 0.02))
+```
+
+How does overall frequency of word correlate it's film frequency?
+```{r, fig.height=9, fig.width=16}
+ggplot(wf, aes(lg10_wf, lg10_cd)) + 
+    geom_point(alpha = 0.5, color = "steelblue") + 
+    geom_smooth(color = "red")
+```
+
+Lets train model similar to one on previous plot (loess).
+```{r}
+set.seed(12)
+fit <- loess(lg10_cd ~ lg10_wf, wf, span = 0.2, 
+           control = loess.control(trace.hat = "approximate"))
+
+pred <- predict(fit, wf)
+```
+
+Compute the root mean squared error (RMSE).
+```{r}
+rmse(wf$lg10_cd, pred)
+```
+
+Plotting predictions line.
+```{r, fig.width=16, fig.height=9}
+ggplot(wf, aes(lg10_wf, lg10_cd)) + 
+    geom_point(alpha = 0.5, color = "steelblue") + 
+    geom_line(data = data.table(lg10_wf = wf$lg10_wf, 
+                                  lg10_cd = pred), 
+                aes(lg10_wf, lg10_cd), color = "green", size = 2)
+```
+
+Seems like there are a lot of cases where word count it movies is less than expected (outliers under curve). Assuming that those cases will have higher prediction errors we can check what they are. Only interested in high frequency words, so will cap them by log10 of overall frequency > 2.
+```{r}
+wf <- mutate(wf, fit_error = abs(wf$lg10_cd - pred))
+high_errors <- wf[rev(order(fit_error))][lg10_wf > 2]
+print(head(high_errors[,.(word, freq_count, cd_count, fit_error)], 30))
+```
+
+A lot of names here. In movies people tend to call each other by name less? As we know that names typically start with capital letter, we can make it more interesting by looking only for words often typed with small letters.
+```{r}
+high_errors_low <- wf[rev(order(fit_error))][lg10_wf > 2 & 
+                                                 freq_low * 3 > freq_count]
+print(head(high_errors_low[,.(word, freq_count, cd_count, fit_error)], 30))
+```
+
+Let's plot some of them
+```{r, fig.width=16, fig.height=9}
+ggplot(wf, aes(lg10_wf, lg10_cd)) + 
+    geom_line(data = data.table(lg10_wf = wf$lg10_wf, 
+                                  lg10_cd = pred), 
+                aes(lg10_wf, lg10_cd), color = "green", size = 2) +
+    geom_text(data = head(high_errors_low, 300), 
+              aes(lg10_wf, lg10_cd, label = word), 
+              size = 3,
+              check_overlap = T)
+
+```
+
+
+
