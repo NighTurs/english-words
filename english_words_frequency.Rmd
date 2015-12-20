@@ -2,7 +2,9 @@
 title: "English words frequency"
 author: "NighTurs"
 date: "December 20, 2015"
-output: html_document
+output: 
+    html_document: 
+        keep_md: true
 ---
 
 ```{r, results='hold', echo=FALSE, message=FALSE}
